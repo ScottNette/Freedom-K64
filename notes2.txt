@@ -1,0 +1,372 @@
+#include "main.h"
+
+
+
+void updateIMU_IRQ()
+{
+    newIMUData = true;
+    //queueMain.event(&serviceIMU);
+}
+
+void updateGPS_IRQ()
+{
+//    queueMain.event(&serviceGPS);
+}
+
+
+//-----------------------------------
+void serviceIMU()
+{
+	int fault1,fault2,fault3 = 0;
+	gpioIMU_D9 = 1;
+    if(newIMUData)
+    {
+    	gpsSerial.attach(NULL, Serial::RxIrq);
+        //newIMUData = false;
+
+        imu.readAccelData();  // Read the x/y/z adc values
+        fault1 = imu.fault;
+        imu.readGyroData();  // Read the x/y/z adc values
+        fault2 = imu.fault;
+        imu.readMagData();  // Read the x/y/z adc values
+        fault3 = imu.fault;
+
+        if (fault1 == 1 || fault2 == 2 || fault3 == 3)
+        {
+        	pc.printf("I have failed\r\n");
+
+        	fault1 = i2c.read(3);
+        	pc.printf("I have failed again\r\n");
+        	DigitalOut i2c_io(I2C_SCL);
+        	i2c_io = !i2c_io;i2c_io = !i2c_io;i2c_io = !i2c_io;i2c_io = !i2c_io;i2c_io = !i2c_io;
+        	i2c_io = !i2c_io;i2c_io = !i2c_io;i2c_io = !i2c_io;i2c_io = !i2c_io;
+
+        	I2C i2c(I2C_SDA, I2C_SCL);
+
+        	while(true){
+
+        		imu.readAccelData();  // Read the x/y/z adc values
+        		wait(0.1);
+
+
+        	};
+
+
+        }
+
+   // Now we'll calculate the accleration value into actual g's
+        imu.ax = ((float)imu.accelCount[0])*imu.aRes - imu.accelBias[0]; // get actual g value, this depends on scale being set
+        imu.ay = ((float)imu.accelCount[1])*imu.aRes - imu.accelBias[1];
+        imu.az = ((float)imu.accelCount[2])*imu.aRes - imu.accelBias[2];
+
+        // Calculate the gyro value into actual degrees per second
+        imu.gx = ((float)imu.gyroCount[0])*imu.gRes - imu.gyroBias[0];  // get actual gyro value, this depends on scale being set
+        imu.gy = ((float)imu.gyroCount[1])*imu.gRes - imu.gyroBias[1];
+        imu.gz = ((float)imu.gyroCount[2])*imu.gRes - imu.gyroBias[2];
+
+        // Calculate the magnetometer values in milliGauss
+        // Include factory calibration per data sheet and user environmental corrections
+        imu.mx = ((float)imu.magCount[0])*imu.mRes*imu.magCalibration[0] - imu.magbias[0];  // get actual magnetometer value, this depends on scale being set
+        imu.my = ((float)imu.magCount[1])*imu.mRes*imu.magCalibration[1] - imu.magbias[1];
+        imu.mz = ((float)imu.magCount[2])*imu.mRes*imu.magCalibration[2] - imu.magbias[2];
+
+        gpsSerial.attach(&serviceGPS, Serial::RxIrq);
+
+    }
+
+    gpioIMU_D9 = 0;
+    
+}
+//-----------------------------------
+void serviceGPS()
+{
+    gpioGPS_D10 = 1;
+    char c;
+    while(gpsSerial.readable())
+    {
+	 c = gpsSerial.getc();
+
+	if((c == '$')  || (buff_flag == 1));           // wait a $
+	{
+		cDataBuffer[rx_in] = c;
+		rx_in++;
+		buff_flag = 1;
+
+		if( c == '\n' )
+		{
+			cDataBuffer[rx_in] = '\0';
+			strncpy(cDataBufferParse, cDataBuffer, GPS_BUFFER_SIZE);
+			buff_flag = 0;
+			parseGPS = 1;
+			rx_in = 0 ;
+			gps.parse(cDataBufferParse);
+			//pc.printf("Dont interrupt me \r\n");
+		}
+	}
+    }
+
+    gpioGPS_D10 = 0;
+}
+
+
+
+
+
+//-----------------------------------    
+void serviceQuat()
+{
+	gpioQuat_D11 = !gpioQuat_D11;
+   // imu.MadgwickQuaternionUpdate(imu.ax, imu.ay, imu.az, imu.gx*PI/180.0f, imu.gy*PI/180.0f, imu.gz*PI/180.0f,  imu.my,  imu.mx, imu.mz);
+    // imu.MahonyQuaternionUpdate(ax, ay, az, gx*PI/180.0f, gy*PI/180.0f, gz*PI/180.0f, my, mx, mz);
+    //wait_us(10);
+	gpioQuat_D11 = !gpioQuat_D11;
+    
+}
+
+//-----------------------------------
+void servicePrint()
+{
+	char gpsString[20];
+    gpioPrint_D12 = 1;
+    //pc.printf(gps.print("ALL"));
+    pc.printf("lat, long, alt = %f,%f,%f\r\n", gps.latitude,  gps. longitude, gps.altitude);
+    memcpy( gpsString, cDataBuffer, 20 );
+    pc.printf("%s\r\n\r\n",gpsString);
+
+    
+    pc.printf("ax = %f", 1000.0*imu.ax);
+    pc.printf(" ay = %f", 1000.0*imu.ay);
+    pc.printf(" az = %f  mg\n\r", 1000.0*imu.az);
+
+    pc.printf("gx = %f", imu.gx);
+    pc.printf(" gy = %f",imu.gy);
+    pc.printf(" gz = %f  deg/s\n\r", imu.gz);
+
+//  pc.printf("gx = %f", mx);
+//  pc.printf(" gy = %f", my);
+//  pc.printf(" gz = %f  mG\n\r", mz);
+
+   // pc.printf(" temperature = %f  C\n\r", imu.readTempData());  // Read the adc values
+    
+    pc.printf("Yaw, Pitch, Roll: %f %f %f\n\r\r\n", imu.yaw, imu.pitch, imu.roll);
+                        
+    gpioPrint_D12 = 0;
+}
+
+void serviceHeartbeat()
+{
+	 gpioSD_D13 = 1;
+          led1 = !led1;
+//      led3 = !led3;
+//        led2 = !led2;
+
+        gpioSD_D13 = 0;
+}
+
+void serviceSD()
+{
+    
+    gpioSD_D13 = !gpioSD_D13;
+    sd.mount();
+    
+    
+    fp_log = fopen("/sd/log.txt", "w+");
+    fp_= fopen("/sd/testing.csv", "a+");
+    if (fp_ == NULL) {
+        fprintf(fp_log,"Unable to write the file \n");
+        pc.printf("FAILED FAILED FAILED \r\n");
+        fclose(fp_log);
+        for(;;){}
+    }
+    else{
+        fprintf(fp_log,"opened log %d \n", rand());
+        fclose(fp_log);
+
+    }
+
+
+    pc.printf("SD opened, running IMU now \r\n");
+    
+        fprintf(fp_,"printed to SD Card");
+        wait(.1);
+        fclose(fp_);
+
+
+        pc.printf("Done Done \r\n");
+		//Unmount the filesystem
+		sd.unmount();
+        dataStructIdx = 0;
+    
+        gpioSD_D13 = !gpioSD_D13;
+    
+        
+        //queuePrint.event(&servicePrint);
+    
+}
+
+void saveData()
+{
+    /*
+    sensorDataStruct[dataStructIdx].ax = imu.ax* float2int16;
+    sensorDataStruct[dataStructIdx].ay = imu.ay* float2int16;
+    sensorDataStruct[dataStructIdx].az = imu.az* float2int16;
+    
+    sensorDataStruct[dataStructIdx].mx = imu.mx* float2int16;
+    sensorDataStruct[dataStructIdx].my = imu.my* float2int16;
+    sensorDataStruct[dataStructIdx].mz = imu.mz* float2int16;
+    
+    sensorDataStruct[dataStructIdx].roll = imu.roll* float2int16;
+    sensorDataStruct[dataStructIdx].pitch = imu.pitch* float2int16;
+    sensorDataStruct[dataStructIdx].yaw = imu.yaw* float2int16;
+    
+    sensorDataStruct[dataStructIdx].gpsLat = gps.gpsLat* float2int16;
+    sensorDataStruct[dataStructIdx].gpsLong = gps.gpsLong* float2int16;
+    sensorDataStruct[dataStructIdx].gpsSpeed = gps.gpsSpeed* float2int16;
+    sensorDataStruct[dataStructIdx].gpsHeading = gps.gpsHeading* float2int16;
+     */       
+
+    
+//    sampledData[dataStructIdx][] = sprintf("%1.6f,%1.6f,%1.6f,%1.6f,%1.6f,%1.6f,%3.2f,%3.2f,%3.2f,%3.5,%3.5,%3.2f,%3.2f",imu.ax,imu.ay ...
+//            imu.az, imu.mx, imu.my, imu.mz, imu.roll, imu.pitch, imu.yaw, gps.gpsLat, gps.gpsLong, gps.gpsSpeed, gps.gpsHeading);
+    
+    //dataStructIdx++;
+    
+    
+}
+
+
+//void queueIMU()
+//{
+//
+//}
+//
+//void queueGPS()
+//{
+//
+//}
+//
+//void queuePrint()
+//{
+//
+//}
+//
+//void queueQuat()
+//{
+//
+//}
+
+void sysCounter()
+{
+	mainCount++;
+	   gpioSD_D13 = !gpioSD_D13;
+}
+
+
+
+int main()
+{
+	InitMain();
+	//IMU_interrupt.rise(&updateIMU_IRQ);
+	gpsSerial.attach(&serviceGPS, Serial::RxIrq);
+	 newIMUData = true;
+    
+#if measureTimingFalse
+	 pc.printf("before tick\r\n");
+	 //sysTick.attach_us(callback(&sysCounter), 100);
+
+
+	 pc.printf("after tick\r\n");
+
+#if 0
+    //IMU_interrupt.rise(&updateIMU_IRQ);
+    
+    //setup GPS ISR
+    //IMU_interrupt.rise(&updateIMU_IRQ);
+    //printfThread.set_priority(osPriorityNormal);
+    t1.set_priority(osPriorityAboveNormal);
+    t2.set_priority(osPriorityNormal2);
+    t3.set_priority(osPriorityNormal3);
+   //q4.set_priority(osPriorityNormal);
+
+    sysTick.attach(&serviceHeartbeat, 0.5);
+     sysTick.attach_us(&serviceIMU, 3000.0);
+     sysTick.attach_us(&serviceQuat, 100.0);
+
+    
+//    q1.call_every(1000, serviceHeartbeat);
+//    q2.call_every(100, serviceIMU);
+//    q3.call_every(01, serviceQuat);
+
+//    sysTick.attach(q3.event(&serviceHeartbeat), 0.5);
+//    sysTick.attach(q1.event(&serviceIMU), 0.50f);
+//   // sysTick.attach_us(queueMain.event(&serviceGPS), 100.0f);
+//    sysTick.attach(q2.event(&serviceQuat), 0.0010000f);
+
+    //sysTick.attach(queueMain.event(&saveData), 0.05f);
+    //sysTick.attach(queuePrint.event(&servicePrint), 2);
+    //sysTick.attach(queuePrint.event(&servicePrint), 2);
+
+    //osThreadSetPriority(osThreadGetId(), osPriorityIdle);
+//
+//t3.start(callback(&q3, &EventQueue::dispatch_forever));
+//    t1.start(callback(&q1, &EventQueue::dispatch_forever));
+//    t2.start(callback(&q2, &EventQueue::dispatch_forever));
+
+
+//    queueThread.start(callback(&queueMain, &EventQueue::dispatch_forever));
+    //  printfThread.start(callback(&queuePrint, &EventQueue::dispatch_forever));
+#endif
+#else
+    wait(1);
+    
+    serviceIMU();
+    //serviceGPS();
+    serviceQuat();
+    servicePrint();
+    
+    //saveData();
+    
+    pc.printf("Done\r\n");
+    
+    
+#endif
+
+    pc.printf("Done\r\n");
+    while (true)
+    {
+        if((mainCount % 1000) == 0)
+        {
+        	serviceQuat();
+        }
+        if((mainCount % 20000) == 0)
+        {
+        	serviceIMU();
+        }
+        if ((mainCount % 1000000) == 0)
+        {
+        	serviceHeartbeat();
+        	servicePrint();
+        	//pc.printf("%d\r\n",mainCount);
+        }
+        
+
+        mainCount++;
+
+        if (mainCount == 100000000)
+        {
+        	mainCount =1;
+        }
+
+    }
+    
+    
+ // wait(osWaitForever);
+
+}
+
+
+
+    
+    
+// the address of the object, member function, and interval
+    //sysTick.attach(callback(&f, &Flipper::flip), 2.0); 

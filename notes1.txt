@@ -1,0 +1,7 @@
+pc.printf("gx = %f, gy = %f, gz = %f \r\n", structIn->gx, structIn->gy, structIn->gz);
+pc.printf("ax = %f, ay = %f, az = %f \r\n", structIn->ax, structIn->ay, structIn->az);
+pc.printf("mx = %f, my = %f, mz = %f \r\n", structIn->mx, structIn->my, structIn->mz);
+
+
+
+Cmd /C Del "${workspace_loc:/${ProjName}/Debug/${ProjName}.bin}"
